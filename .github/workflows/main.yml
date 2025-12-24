@@ -40,7 +40,6 @@ jobs:
           POSTGRES_DB: django_db
           DB_HOST: 127.0.0.1
           DB_PORT: 5432
-          # ⚠️ ОБЯЗАТЕЛЬНО ДОБАВЬТЕ ЭТИ ПЕРЕМЕННЫЕ!
           DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
           DJANGO_DEBUG: "False"
         run: |
