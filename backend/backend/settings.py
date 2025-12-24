@@ -1,3 +1,5 @@
+"""Django settings for Taski project."""
+
 import os
 from pathlib import Path
 

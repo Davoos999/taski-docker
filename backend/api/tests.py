@@ -1,10 +1,15 @@
+"""Tests for API module."""
+
 from http import HTTPStatus
 
 from django.test import Client, TestCase
 
 
 class TaskiAPITestCase(TestCase):
+    """Test case for Task model."""
+
     def setUp(self):
+        """Test creating a new task."""
         self.guest_client = Client()
 
     def test_list_exists(self):
