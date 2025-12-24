@@ -1,3 +1,5 @@
+version: '3.8'
+
 volumes:
   pg_data:
   static_volume:
@@ -7,46 +9,70 @@ volumes:
 services:
   db:
     image: postgres:13
-    env_file: .env
     volumes:
       - pg_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: django_db
+      POSTGRES_USER: django_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U django_user"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   backend:
-    image: ${DOCKER_USERNAME}/kittygram_backend:latest
-    env_file: .env
+    image: ${DOCKER_USERNAME}/taski_backend:latest
     depends_on:
       db:
         condition: service_healthy
+    environment:
+      SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DEBUG: "False"
+      TASKI_DOMAIN: ${TASKI_DOMAIN}
+      ALLOWED_HOSTS: ${TASKI_DOMAIN},localhost,127.0.0.1,backend,gateway,*
+      CSRF_TRUSTED_ORIGINS: https://${TASKI_DOMAIN},http://${TASKI_DOMAIN}
+      DB_HOST: db
+      DB_PORT: 5432
+      POSTGRES_DB: django_db
+      POSTGRES_USER: django_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - django_static_volume:/app/collected_static
       - media_volume:/app/media
-    command: "gunicorn kittygram_backend.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    command: "gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   frontend:
-    image: ${DOCKER_USERNAME}/kittygram_frontend:latest
-    env_file: .env
-    command: cp -r /app/build/. /frontend_static/ && tail -f /dev/null
+    image: ${DOCKER_USERNAME}/taski_frontend:latest
     volumes:
-      - static_volume:/frontend_static
+      - static_volume:/app/build
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/build/index.html || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   gateway:
-    image: ${DOCKER_USERNAME}/kittygram_gateway:latest
-    env_file: .env
+    image: ${DOCKER_USERNAME}/taski_gateway:latest
     ports:
-      - "9000:80"
+      - "8000:80"
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     volumes:
       - static_volume:/usr/share/nginx/html
       - django_static_volume:/collected_static
       - media_volume:/media
+    environment:
+      - SERVER_NAME=${TASKI_DOMAIN}
     restart: unless-stopped
