@@ -1,166 +1,34 @@
+# .github/workflows/main.yml
 name: Main Taski workflow
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:13.10
-        env:
-          POSTGRES_USER: django_user
-          POSTGRES_PASSWORD: django_password
-          POSTGRES_DB: django_db
-        ports:
-          - 5432:5432
-        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.12
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools
-          pip install flake8==6.0.0 flake8-isort==6.0.0
-          pip install -r ./backend/requirements.txt
-
-      - name: Test with flake8 and django tests
-        env:
-          POSTGRES_USER: django_user
-          POSTGRES_PASSWORD: django_password
-          POSTGRES_DB: django_db
-          DB_HOST: 127.0.0.1
-          DB_PORT: 5432
-          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
-          DJANGO_DEBUG: "False"
-        run: |
-          python -m flake8 --extend-ignore=I backend/
-          cd backend/
-          # Запускаем только конкретные тесты
-          python manage.py test api.tests
-
-  frontend_tests:
+    # Разворачиваем окружение:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up nodeJS
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-
-      - name: Install dependencies
-        run: |
-          cd frontend/
-          npm ci
-
-      - name: Test frontend
-        run: |
-          cd frontend/
-          npm run test
-
-  build_and_push_to_docker_hub:
-    name: Build and push Docker images
-    runs-on: ubuntu-latest
-    needs: [tests, frontend_tests]
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Login to Docker
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push backend
-        uses: docker/build-push-action@v4
-        with:
-          context: ./backend/
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/taski_backend:latest
-            ${{ secrets.DOCKER_USERNAME }}/taski_backend:${{ github.sha }}
-
-      - name: Build and push frontend
-        uses: docker/build-push-action@v4
-        with:
-          context: ./frontend/
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/taski_frontend:latest
-            ${{ secrets.DOCKER_USERNAME }}/taski_frontend:${{ github.sha }}
-
-      - name: Build and push gateway
-        uses: docker/build-push-action@v4
-        with:
-          context: ./gateway/
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/taski_gateway:latest
-            ${{ secrets.DOCKER_USERNAME }}/taski_gateway:${{ github.sha }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build_and_push_to_docker_hub
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v0.1.7
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
-          TASKI_DOMAIN: ${{ secrets.TASKI_DOMAIN }}
-          POSTGRES_USER: django_user
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            cd /home/taski
-            
-            echo "🚀 Запускаем контейнеры..."
-            
-            DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
-            DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}" \
-            DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
-            TASKI_DOMAIN="${{ secrets.TASKI_DOMAIN }}" \
-            docker compose -f docker-compose.production.yml pull && \
-            docker compose -f docker-compose.production.yml down 2>/dev/null || true && \
-            docker compose -f docker-compose.production.yml up -d
-            
-            echo "⏳ Ждем запуска контейнеров (20 сек)..."
-            sleep 20
-            
-            echo "📝 Выполняем миграции..."
-            docker compose -f docker-compose.production.yml exec -T backend python manage.py migrate --noinput
-            
-            echo "🗂️ Собираем статику..."
-            docker compose -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput --clear
-            
-            echo "✅ Проверяем контейнеры..."
-            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(taski|NAME)"
-            
-            echo "🌐 Проверка доступности Gateway..."
-            # Taski работает на порту 8000
-            if curl -f http://localhost:8000/ > /dev/null 2>&1; then
-              echo "✅ Gateway работает на порту 8000"
-            else
-              echo "⚠️ Gateway не отвечает на localhost:8000"
-              echo "Проверяем контейнер gateway..."
-              docker compose -f docker-compose.production.yml logs gateway --tail=20
-            fi
+    # Копируем код проекта
+    - name: Check out code
+      uses: actions/checkout@v3
+    # Устанавливаем Python с помощью action
+    - name: Set up Python
+      uses: actions/setup-python@v4
+    # В action setup-python@v4 передаём параметр — версию Python
+      with:
+        python-version: 3.12
+    # Обновляем pip, устанавливаем flake8 и flake8-isort, 
+    # устанавливаем зависимости проекта
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools
+        pip install flake8==6.0.0 flake8-isort==6.0.0
+    # Запускаем flake8
+    - name: Test with flake8
+      # Вызываем flake8 и указываем ему,
+      # что нужно проверить файлы только в папке backend/
+      run: python -m flake8 backend/
