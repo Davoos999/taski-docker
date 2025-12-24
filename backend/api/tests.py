@@ -1,15 +1,16 @@
-"""Tests for API module."""
+"""Тесты какие-то."""
 
 from http import HTTPStatus
 
+from api import models
 from django.test import Client, TestCase
 
 
 class TaskiAPITestCase(TestCase):
-    """Test case for Task model."""
+    """Тесты какие-то."""
 
     def setUp(self):
-        """Test creating a new task."""
+        """Проверка доступности списка задач."""
         self.guest_client = Client()
 
     def test_list_exists(self):
@@ -22,3 +23,4 @@ class TaskiAPITestCase(TestCase):
         data = {'title': 'Test', 'description': 'Test'}
         response = self.guest_client.post('/api/tasks/', data=data)
         self.assertEqual(response.status_code, HTTPStatus.CREATED)
+        self.assertTrue(models.Task.objects.filter(title='Test').exists())
