@@ -1,0 +1,17 @@
+name: Coping docker-compose.production.yml
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy_yml:
+    runs-on: ubuntu-latest
+    steps:
+      - name: copy docker-compose.production.yml via scp
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          source: docker-compose.production.yml
+          target: taski
