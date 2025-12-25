@@ -1,16 +1,20 @@
-# docker-compose.production.yml
+version: '3.8'
 
 volumes:
   pg_data_production:
   static_volume:
 
-# Всё отличие — заменяем build на image и указываем, какой образ использовать
 services:
   db:
     image: postgres:13.10
     env_file: .env
     volumes:
       - pg_data_production:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U django_user -d django_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     image: davoos999/taski_backend:latest
@@ -18,14 +22,34 @@ services:
     volumes:
       - static_volume:/app/collected_static
     depends_on:
-      - db  # ← ждем базу
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: >
+      sh -c "
+      python manage.py migrate &&
+      python manage.py collectstatic --noinput &&
+      cp -r /app/collected_static/. /app/static/ &&
+      gunicorn backend.wsgi:application --bind 0.0.0.0:8000
+      "
 
   frontend:
     image: davoos999/taski_frontend:latest
     env_file: .env
-    command: cp -r /app/build/. /frontend_static/
     volumes:
-      - static_volume:/app/collected_static
+      - static_volume:/frontend_static
+    command: >
+      sh -c "
+      cp -r /app/build/. /frontend_static/ &&
+      cp -r /frontend_static/. /staticfiles/ 2>/dev/null || true &&
+      echo 'Frontend files ready' &&
+      tail -f /dev/null
+      "
 
   gateway:
     image: davoos999/taski_gateway:latest
@@ -33,7 +57,8 @@ services:
     volumes:
       - static_volume:/staticfiles/
     ports:
-      - 80:80
-      - 443:443
+      - "80:80"
+      - "443:443"
     depends_on:
-      - backend  # ← ВАЖНО: ждем старта backend!
+      backend:
+        condition: service_healthy
