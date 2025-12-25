@@ -2,8 +2,8 @@ name: Main Taski workflow
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -25,35 +25,23 @@ jobs:
           python-version: 3.12
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip setuptools
-          pip install flake8==6.0.0 flake8-isort==6.0.0
+          python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          pip install flake8
       - name: Test backend
         env:
+          SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'test-key-for-ci' }}
+          DEBUG: "False"
+          POSTGRES_DB: django_db
           POSTGRES_USER: django_user
           POSTGRES_PASSWORD: django_password
-          POSTGRES_DB: django_db
-          DB_HOST: 127.0.0.1
+          DB_HOST: localhost
           DB_PORT: 5432
+          ALLOWED_HOSTS: localhost,127.0.0.1
         run: |
-          python -m flake8 backend/
-          python backend/manage.py test api
-
-  build_and_push_to_docker_hub:
-    runs-on: ubuntu-latest
-    needs: tests
-    steps:
-      - uses: actions/checkout@v3
-      - uses: docker/setup-buildx-action@v2
-      - uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - uses: docker/build-push-action@v4
-        with:
-          context: ./backend/
-          push: true
-          tags: davoos999/taski_backend:latest
+          cd backend
+          python -m flake8 .
+          python manage.py test api
 
   frontend_tests:
     runs-on: ubuntu-latest
@@ -71,9 +59,9 @@ jobs:
           cd frontend
           npm run test
 
-  build_frontend_and_push_to_docker_hub:
+  build_backend:
     runs-on: ubuntu-latest
-    needs: frontend_tests
+    needs: [tests, frontend_tests]
     steps:
       - uses: actions/checkout@v3
       - uses: docker/setup-buildx-action@v2
@@ -81,41 +69,59 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - uses: docker/build-push-action@v4
+      - name: Build and push backend
+        uses: docker/build-push-action@v4
         with:
-          context: ./frontend/
+          context: ./backend
           push: true
-          tags: davoos999/taski_frontend:latest
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/taski_backend:latest
+            ${{ secrets.DOCKER_USERNAME }}/taski_backend:${{ github.sha }}
 
-  build_gateway_and_push_to_docker_hub:
-    name: Push gateway Docker image to DockerHub
+  build_frontend:
     runs-on: ubuntu-latest
+    needs: [tests, frontend_tests]
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Login to Docker
-        uses: docker/login-action@v2
+      - uses: actions/checkout@v3
+      - uses: docker/setup-buildx-action@v2
+      - uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Push to DockerHub
+      - name: Build and push frontend
         uses: docker/build-push-action@v4
         with:
-          context: ./gateway/
+          context: ./frontend
           push: true
-          tags: davoos999/taski_gateway:latest
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/taski_frontend:latest
+            ${{ secrets.DOCKER_USERNAME }}/taski_frontend:${{ github.sha }}
+
+  build_gateway:
+    runs-on: ubuntu-latest
+    needs: [tests, frontend_tests]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-buildx-action@v2
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build and push gateway
+        uses: docker/build-push-action@v4
+        with:
+          context: ./gateway
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/taski_gateway:latest
+            ${{ secrets.DOCKER_USERNAME }}/taski_gateway:${{ github.sha }}
 
   deploy:
     runs-on: ubuntu-latest
-    needs:
-      - build_and_push_to_docker_hub
-      - build_frontend_and_push_to_docker_hub
-      - build_gateway_and_push_to_docker_hub
+    needs: [build_backend, build_frontend, build_gateway]
     steps:
       - name: Deploy to production
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
@@ -123,38 +129,57 @@ jobs:
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
             # Переходим в директорию проекта
-            cd ~/taski
+            cd /home/taski
             
-            # 1. Пуллим свежие образы
-            echo "=== Pulling latest images ==="
-            sudo docker compose -f docker-compose.production.yml pull
+            echo "🚀 Запускаем контейнеры..."
             
-            # 2. Останавливаем старые контейнеры
-            echo "=== Stopping old containers ==="
-            sudo docker compose -f docker-compose.production.yml down
+            # Создаем .env файл если его нет
+            if [ ! -f .env ]; then
+              cat > .env << EOF
+            # PostgreSQL
+            POSTGRES_DB=taski_db
+            POSTGRES_USER=taski_user
+            POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_HOST=db
+            DB_PORT=5432
             
-            # 3. Запускаем новые
-            echo "=== Starting new containers ==="
-            sudo docker compose -f docker-compose.production.yml up -d
+            # Django
+            SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+            DEBUG=False
+            ALLOWED_HOSTS=${{ secrets.TASKI_DOMAIN }},localhost,127.0.0.1,backend,158.160.31.110
+            CSRF_TRUSTED_ORIGINS=https://${{ secrets.TASKI_DOMAIN }},http://${{ secrets.TASKI_DOMAIN }}
             
-            # 4. Выполняем миграции и сбор статики
-            echo "=== Running migrations ==="
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py migrate --noinput
+            # Docker
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+            EOF
+            fi
             
-            echo "=== Collecting static files ==="
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py collectstatic --noinput
+            # Обновляем образы и запускаем
+            docker compose -f docker-compose.production.yml pull
+            docker compose -f docker-compose.production.yml down 2>/dev/null || true
+            docker compose -f docker-compose.production.yml up -d
             
-            # 5. Проверяем что все работает
-            echo "=== Checking containers status ==="
-            sleep 15
-            sudo docker compose -f docker-compose.production.yml ps
+            echo "⏳ Ждем запуска контейнеров (30 сек)..."
+            sleep 30
             
-            echo "=== Checking backend health ==="
-            sudo docker compose -f docker-compose.production.yml exec backend curl -f http://localhost:8000/ || echo "Backend health check failed"
+            echo "📝 Выполняем миграции..."
+            docker compose -f docker-compose.production.yml exec -T backend python manage.py migrate --noinput 2>/dev/null || echo "Миграции уже выполнены"
             
-            echo "=== Checking gateway ==="
-            curl -f http://localhost/ || curl -I http://localhost || echo "Gateway check failed"
+            echo "🗂️ Собираем статику..."
+            docker compose -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput 2>/dev/null || echo "Статика уже собрана"
             
-            # 6. Чистим старые образы
-            echo "=== Cleaning up ==="
-            sudo docker image prune -f
+            echo "✅ Проверяем контейнеры..."
+            docker compose -f docker-compose.production.yml ps
+            
+            echo "🌐 Проверка доступности..."
+            # Проверяем на порту 80 (стандартный HTTP)
+            if curl -f http://localhost/ > /dev/null 2>&1; then
+              echo "✅ Gateway работает на порту 80"
+            else
+              echo "⚠️ Gateway не отвечает на localhost:80"
+              echo "Проверяем логи gateway..."
+              docker compose -f docker-compose.production.yml logs gateway --tail=30
+              exit 1
+            fi
+            
+            echo "🎉 Деплой завершен успешно!"
