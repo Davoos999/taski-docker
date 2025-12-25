@@ -1,81 +1,39 @@
-version: '3.8'
-
-volumes:
-  pg_data_production:
-  static_volume:
-  frontend_static_volume:
-
 services:
   db:
     image: postgres:13.10
-    env_file: .env
-    volumes:
-      - pg_data_production:/var/lib/postgresql/data
-    environment:
-      POSTGRES_USER: django_user
-      POSTGRES_PASSWORD: mysecretpassword
-      POSTGRES_DB: django
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U django_user"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     restart: unless-stopped
+    env_file: ./.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
 
   backend:
     image: davoos999/taski_backend:latest
-    env_file: .env
-    volumes:
-      - static_volume:/app/collected_static
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
     restart: unless-stopped
-    command: >
-      sh -c "
-      echo 'Waiting for database...' &&
-      sleep 5 &&
-      python manage.py migrate &&
-      python manage.py collectstatic --noinput &&
-      cp -r /app/collected_static/. /staticfiles/static/ 2>/dev/null || true &&
-      gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 3
-      "
+    env_file: ./.env
+    depends_on:
+      - db
+    volumes:
+      - static_volume:/app/collected_static/
+      - media_volume:/app/media/
 
-    frontend:
-      image: davoos999/taski_frontend:latest
-      env_file: .env
-      volumes:
-        - static_volume:/staticfiles/
-      command: >
-        sh -c "
-        # Копируем и держим контейнер живым
-        echo 'Starting frontend...' &&
-        cp -r /app/build/. /staticfiles/ &&
-        ls -la /staticfiles/ &&
-        echo 'Frontend static files ready' &&
-        # БЕСКОНЕЧНЫЙ ЦИКЛ чтобы контейнер не завершался
-        while true; do sleep 3600; done
-        "
-      restart: unless-stopped
+  frontend:
+    image: davoos999/taski_frontend:latest
+    volumes:
+       - static_volume:/app/build/
 
   gateway:
     image: davoos999/taski_gateway:latest
-    env_file: .env
-    volumes:
-      - static_volume:/staticfiles/
-      - frontend_static_volume:/frontend_files/
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      backend:
-        condition: service_healthy
-      frontend:
-        condition: service_started
     restart: unless-stopped
+    env_file: ./.env
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - frontend
+    volumes:
+      - static_volume:/staticfiles
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
