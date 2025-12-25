@@ -141,7 +141,7 @@ jobs:
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
             # Переходим в директорию проекта
-            cd /home/taski
+            cd taski
             
             echo "🚀 Запускаем контейнеры..."
             
