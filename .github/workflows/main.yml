@@ -108,45 +108,60 @@ jobs:
           # Тут вместо username должен быть ваш логин на Docker Hub
           tags: davoos999/taski_gateway:latest
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs:
-      # Дождёмся билда всех образов Taski
-      - build_and_push_to_docker_hub
-      - build_frontend_and_push_to_docker_hub
-      - build_gateway_and_push_to_docker_hub
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      # Копируем docker-compose.production.yml на продакшен-сервер
-      - name: Copy docker-compose.yml via ssh
-        uses: appleboy/scp-action@master
-        # Передаём параметры для action appleboy/scp-action:
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          source: "docker-compose.production.yml"
-          target: "taski"
-      - name: Executing remote ssh commands to deploy
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          # Параметр script передаёт в action appleboy/ssh-action команды,
-          # которые нужно выполнить на сервере,
-          # с которым установлено соединение
-          script: |
+deploy:
+  runs-on: ubuntu-latest
+  needs:
+    - build_and_push_to_docker_hub
+    - build_frontend_and_push_to_docker_hub
+    - build_gateway_and_push_to_docker_hub
+  steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USERNAME }}
+        key: ${{ secrets.SSH_KEY }}
+        passphrase: ${{ secrets.SSH_PASSPHRASE }}
+        script: |
+          # 1. Клонируем/обновляем репозиторий на сервере
+          cd ~
+          if [ -d "taski" ]; then
             cd taski
-            # Выполняет pull образов с Docker Hub
-            sudo docker compose -f docker-compose.production.yml pull
-            # Перезапускает все контейнеры в Docker Compose
-            sudo docker compose -f docker-compose.production.yml down
-            sudo docker compose -f docker-compose.production.yml up -d
-            # Выполняет миграции и сбор статики
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py migrate
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py collectstatic
-            sudo docker compose -f docker-compose.production.yml exec backend cp -r /app/collected_static/. /backend_static/static/
+            git pull origin main
+          else
+            git clone https://github.com/ваш-username/ваш-репозиторий.git taski
+            cd taski
+          fi
+          
+          # 2. Убедимся что файл существует
+          if [ ! -f "docker-compose.production.yml" ]; then
+            echo "ERROR: docker-compose.production.yml not found!"
+            ls -la
+            exit 1
+          fi
+          
+          # 3. Создаем .env если нужно
+          if [ ! -f ".env" ]; then
+            cat > .env << 'EOF'
+          POSTGRES_USER=django_user
+          POSTGRES_PASSWORD=mysecretpassword
+          POSTGRES_DB=django
+          DB_HOST=db
+          DB_PORT=5432
+          ALLOWED_HOSTS=davoshost.ddns.net,localhost,127.0.0.1,158.160.31.110
+          CSRF_TRUSTED_ORIGINS=http://davoshost.ddns.net
+          EOF
+          fi
+          
+          # 4. Деплой
+          sudo docker compose -f docker-compose.production.yml pull
+          sudo docker compose -f docker-compose.production.yml down
+          sudo docker compose -f docker-compose.production.yml up -d
+          
+          # 5. Проверка
+          sleep 20
+          sudo docker compose -f docker-compose.production.yml ps
+          curl -f http://localhost/ || echo "Warning: Service not fully ready"
