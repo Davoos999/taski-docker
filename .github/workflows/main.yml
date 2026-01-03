@@ -144,27 +144,13 @@ jobs:
             cd taski
             
             echo "🚀 Запускаем контейнеры..."
+
+            DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+            DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}" \
+            DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
+            TASKI_DOMAIN="${{ secrets.TASKI_DOMAIN }}" \            
             
-            # Создаем .env файл если его нет
-            if [ ! -f .env ]; then
-              cat > .env << EOF
-            # PostgreSQL
-            POSTGRES_DB=taski_db
-            POSTGRES_USER=taski_user
-            POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_HOST=db
-            DB_PORT=5432
-            
-            # Django
-            SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
-            DEBUG=False
-            ALLOWED_HOSTS=${{ secrets.TASKI_DOMAIN }},localhost,127.0.0.1,backend,158.160.31.110
-            CSRF_TRUSTED_ORIGINS=https://${{ secrets.TASKI_DOMAIN }},http://${{ secrets.TASKI_DOMAIN }}
-            
-            # Docker
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
-            EOF
-            fi
+        
             
             # Обновляем образы и запускаем
             docker compose -f docker-compose.production.yml pull
