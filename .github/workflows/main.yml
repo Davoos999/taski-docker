@@ -131,7 +131,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           source: docker-compose.production.yml
-          target: taski
+          target: /home/yc-user/taski/
       - name: Deploy to production
         uses: appleboy/ssh-action@v0.1.7
         with:
@@ -149,8 +149,6 @@ jobs:
             DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}" \
             DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
             TASKI_DOMAIN="${{ secrets.TASKI_DOMAIN }}" \            
-            
-        
             
             # Обновляем образы и запускаем
             docker compose -f docker-compose.production.yml pull
