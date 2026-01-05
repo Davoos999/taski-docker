@@ -33,6 +33,7 @@ services:
       - frontend
     volumes:
       - static_volume:/staticfiles
+      - ./ssl_certs:/etc/letsencrypt:ro
 
 volumes:
   postgres_data:
