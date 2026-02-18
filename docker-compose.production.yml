@@ -13,21 +13,19 @@ services:
     depends_on:
       - db
     volumes:
-      - static_volume:/app/collected_static/
+      - static_volume:/staticfiles
       - media_volume:/app/media/
 
   frontend:
     image: davoos999/taski_frontend:latest
-    volumes:
-       - static_volume:/app/build/
+
 
   gateway:
     image: davoos999/taski_gateway:latest
     restart: unless-stopped
     env_file: ./.env
     ports:
-      - "80:80"
-      - "443:443"
+      - "8001:80"
     depends_on:
       - backend
       - frontend
